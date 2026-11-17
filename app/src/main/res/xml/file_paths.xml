@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="ljk_captures_cache" path="ljk_captures/" />
+    <external-cache-path name="ljk_captures_ext" path="ljk_captures/" />
+    <files-path name="internal_files" path="." />
+    <external-files-path name="external_files" path="." />
+</paths>
