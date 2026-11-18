@@ -9,11 +9,13 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.net.http.SslError
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -54,8 +56,11 @@ class MainActivity : AppCompatActivity() {
     private var pendingWebPermissionRequest: PermissionRequest? = null
 
     private var hasMainFrameError = false
+    private var isRetryingFromOffline = false
     private var isDeviceOnline = true
+    private var offlineBannerDismissed = false
     private var isWebPullToRefreshAllowed = true
+    private var lastTargetUrl = ""
     private var lastBackPressedMs = 0L
     private var lastRenderCrashMs = 0L
     private var renderCrashCount = 0
@@ -133,6 +138,7 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.tvSplashVersion.text = "ENTERPRISE EDITION v${BuildConfig.VERSION_NAME}"
 
         applyKeepScreenOnPreference()
         setupWebView()
@@ -143,6 +149,9 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState != null) {
             binding.webView.restoreState(savedInstanceState)
             hideSplashLoader()
+            if (!isDeviceOnline) {
+                showOfflineErrorScreen("ERR_INTERNET_DISCONNECTED")
+            }
         } else {
             loadConfiguredServer(forceNetwork = true)
         }
@@ -166,47 +175,60 @@ class MainActivity : AppCompatActivity() {
         binding.swipeRefresh.setSlingshotDistance(320)
         binding.swipeRefresh.setOnChildScrollUpCallback { _, _ ->
             !isWebPullToRefreshAllowed ||
+                binding.layoutOfflineError.visibility == View.VISIBLE ||
                 binding.webView.scrollY > 0 ||
                 binding.webView.canScrollVertically(-1)
         }
         binding.swipeRefresh.setOnRefreshListener {
+            if (!isDeviceOnline) {
+                binding.swipeRefresh.isRefreshing = false
+                showOfflineErrorScreen("ERR_INTERNET_DISCONNECTED")
+                return@setOnRefreshListener
+            }
             hasMainFrameError = false
-            binding.webView.settings.cacheMode =
-                if (isDeviceOnline) WebSettings.LOAD_DEFAULT else WebSettings.LOAD_CACHE_ELSE_NETWORK
-            binding.webView.reload()
+            isRetryingFromOffline = false
+            binding.webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+            val targetUrl = lastTargetUrl.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            if (targetUrl != null && (binding.webView.url.isNullOrBlank() || binding.webView.url?.startsWith("chrome-error://") == true)) {
+                binding.webView.loadUrl(targetUrl)
+            } else {
+                binding.webView.reload()
+            }
         }
 
         binding.btnSplashChangeServer.setOnClickListener { openServerSetup() }
         binding.btnBannerRetry.setOnClickListener { retryCurrentOrHome() }
         binding.btnBannerServer.setOnClickListener { openServerSetup() }
-        binding.btnErrorRetry.setOnClickListener { retryCurrentOrHome() }
-        binding.btnErrorChangeServer.setOnClickListener { openServerSetup() }
-
-        binding.btnErrorOpenCache.setOnClickListener {
-            hasMainFrameError = false
-            binding.layoutOfflineError.visibility = View.GONE
-            binding.webView.settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
-            if (binding.webView.url.isNullOrBlank()) {
-                binding.webView.loadUrl("${prefs.getServerUrl()}${prefs.getStartPath()}")
-            } else {
-                binding.webView.reload()
-            }
-            Toast.makeText(this, "Membuka data & halaman tersimpan (Cache Offline)...", Toast.LENGTH_SHORT).show()
+        binding.btnBannerDismiss.setOnClickListener {
+            offlineBannerDismissed = true
+            binding.bannerOffline.visibility = View.GONE
         }
+        binding.btnErrorRetry.setOnClickListener { retryCurrentOrHome() }
+        binding.btnErrorWifiSettings.setOnClickListener { openNetworkSettings() }
+        binding.btnErrorChangeServer.setOnClickListener { openServerSetup() }
     }
 
     private fun setupNetworkMonitor() {
         networkMonitor = NetworkMonitor(this) { connected, _ ->
             val wasOffline = !isDeviceOnline
             isDeviceOnline = connected
+            if (connected) {
+                offlineBannerDismissed = false
+            }
 
-            binding.bannerOffline.visibility = if (connected) View.GONE else View.VISIBLE
+            binding.bannerOffline.visibility =
+                if (!connected &&
+                    !offlineBannerDismissed &&
+                    binding.layoutOfflineError.visibility != View.VISIBLE &&
+                    binding.layoutSplashLoader.visibility != View.VISIBLE
+                ) View.VISIBLE else View.GONE
 
-            // Auto-reconnect otomatis ketika Wi-Fi sekolah tersambung kembali
-            if (connected && wasOffline && hasMainFrameError) {
+            // Auto-reconnect otomatis ketika Wi-Fi / internet tersambung kembali
+            if (connected && (wasOffline || hasMainFrameError) && hasMainFrameError) {
                 retryCurrentOrHome()
             }
         }
+        isDeviceOnline = networkMonitor.currentState().first
         networkMonitor.start()
     }
 
@@ -371,25 +393,49 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                android.util.Log.d("WMVAA_WEB", "onPageStarted url=$url")
-                hasMainFrameError = false
-                binding.layoutOfflineError.visibility = View.GONE
+                android.util.Log.d("WMVAA_WEB", "onPageStarted url=$url hasMainFrameError=$hasMainFrameError")
+
+                // Jangan pernah sembunyikan halaman offline atau tampilkan halaman error bawaan Chromium
+                if (url.isNullOrBlank() || url.startsWith("chrome-error://") || url == "about:blank") {
+                    if (hasMainFrameError || url?.startsWith("chrome-error://") == true) {
+                        binding.webView.visibility = View.INVISIBLE
+                        binding.layoutOfflineError.visibility = View.VISIBLE
+                    }
+                    return
+                }
+
+                if (url.startsWith("http://") || url.startsWith("https://")) {
+                    lastTargetUrl = url
+                }
+
+                if (!isRetryingFromOffline) {
+                    hasMainFrameError = false
+                    binding.layoutOfflineError.visibility = View.GONE
+                    binding.webView.visibility = View.VISIBLE
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                android.util.Log.d("WMVAA_WEB", "onPageFinished url=$url title=${view?.title} crashCount=$renderCrashCount")
+                android.util.Log.d("WMVAA_WEB", "onPageFinished url=$url title=${view?.title} crashCount=$renderCrashCount hasMainFrameError=$hasMainFrameError")
                 CookieManager.getInstance().flush()
                 binding.swipeRefresh.isRefreshing = false
                 binding.progressBar.visibility = View.GONE
+                resetRetryButtonState()
+
                 if (url != null && url.startsWith("chrome-error://")) {
-                    showOfflineErrorScreen("Halaman gagal dimuat oleh WebView.")
+                    isRetryingFromOffline = false
+                    showOfflineErrorScreen("ERR_INTERNET_DISCONNECTED")
                     return
                 }
-                if (!hasMainFrameError) {
+
+                if (!hasMainFrameError && url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+                    isRetryingFromOffline = false
                     renderCrashCount = 0
                     hideSplashLoader()
                     binding.layoutOfflineError.visibility = View.GONE
+                    binding.webView.visibility = View.VISIBLE
+                    binding.bannerOffline.visibility = if (isDeviceOnline) View.GONE else View.VISIBLE
                     binding.swipeRefresh.isEnabled = isWebPullToRefreshAllowed
                 }
             }
@@ -408,7 +454,7 @@ class MainActivity : AppCompatActivity() {
                     recreate()
                 } else {
                     // Cegah crash loop berulang: tampilkan layar pemulihan ramah pengguna
-                    showOfflineErrorScreen("Renderer WebView berhenti merespons. Silakan Muat Ulang atau bersihkan cache aplikasi.")
+                    showOfflineErrorScreen("RENDERER_CRASHED")
                 }
                 return true
             }
@@ -421,7 +467,13 @@ class MainActivity : AppCompatActivity() {
                 super.onReceivedError(view, request, error)
                 android.util.Log.e("WMVAA_WEB", "onReceivedError main=${request?.isForMainFrame} url=${request?.url} code=${error?.errorCode} desc=${error?.description}")
                 if (request?.isForMainFrame == true) {
-                    val desc = error?.description?.toString() ?: "Server lokal tidak dapat dijangkau."
+                    isRetryingFromOffline = false
+                    view?.stopLoading()
+                    val reqUrl = request.url?.toString().orEmpty()
+                    if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
+                        lastTargetUrl = reqUrl
+                    }
+                    val desc = error?.description?.toString()?.takeIf { it.isNotBlank() } ?: "ERR_INTERNET_DISCONNECTED"
                     showOfflineErrorScreen(desc)
                 }
             }
@@ -433,7 +485,9 @@ class MainActivity : AppCompatActivity() {
             ) {
                 super.onReceivedHttpError(view, request, errorResponse)
                 if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 502) {
-                    showOfflineErrorScreen("Server mengembalikan status HTTP ${errorResponse?.statusCode}")
+                    isRetryingFromOffline = false
+                    view?.stopLoading()
+                    showOfflineErrorScreen("HTTP_${errorResponse?.statusCode}")
                 }
             }
 
@@ -529,9 +583,20 @@ class MainActivity : AppCompatActivity() {
         val baseUrl = prefs.getServerUrl()
         val startPath = prefs.getStartPath()
         val fullUrl = "$baseUrl$startPath"
+        lastTargetUrl = fullUrl
+
+        isDeviceOnline = networkMonitor.currentState().first
+
+        if (!isDeviceOnline) {
+            showOfflineErrorScreen("ERR_INTERNET_DISCONNECTED")
+            return
+        }
 
         hasMainFrameError = false
+        isRetryingFromOffline = false
         binding.layoutOfflineError.visibility = View.GONE
+        binding.bannerOffline.visibility = View.GONE
+        binding.webView.visibility = View.VISIBLE
         binding.layoutSplashLoader.visibility = View.VISIBLE
         binding.tvSplashServerUrl.text = baseUrl
         binding.tvSplashStatus.text = getString(R.string.connecting_to_server)
@@ -551,27 +616,82 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun retryCurrentOrHome() {
-        hasMainFrameError = false
-        binding.layoutOfflineError.visibility = View.GONE
-        binding.webView.settings.cacheMode =
-            if (isDeviceOnline) WebSettings.LOAD_DEFAULT else WebSettings.LOAD_CACHE_ELSE_NETWORK
-        val current = binding.webView.url
-        if (current.isNullOrBlank() || current == "about:blank") {
-            loadConfiguredServer(forceNetwork = true)
-        } else {
-            binding.webView.reload()
+        isDeviceOnline = networkMonitor.currentState().first
+        val fallbackUrl = "${prefs.getServerUrl()}${prefs.getStartPath()}"
+        val currentWebUrl = binding.webView.url
+        val targetUrl = when {
+            lastTargetUrl.startsWith("http://") || lastTargetUrl.startsWith("https://") -> lastTargetUrl
+            currentWebUrl != null && (currentWebUrl.startsWith("http://") || currentWebUrl.startsWith("https://")) -> currentWebUrl
+            else -> fallbackUrl
         }
+        lastTargetUrl = targetUrl
+
+        if (!isDeviceOnline) {
+            showOfflineErrorScreen("ERR_INTERNET_DISCONNECTED")
+            Toast.makeText(
+                this,
+                "Perangkat masih offline. Aktifkan Wi-Fi atau Data Seluler terlebih dahulu.",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        // Pertahankan layar offline selama proses menyambung ulang agar halaman error bawaan Chromium tidak pernah terlihat
+        hasMainFrameError = false
+        isRetryingFromOffline = true
+        binding.btnErrorRetry.isEnabled = false
+        binding.btnErrorRetry.text = "Menyambungkan ulang..."
+        binding.webView.visibility = View.INVISIBLE
+        binding.webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        binding.webView.loadUrl(targetUrl)
+    }
+
+    private fun resetRetryButtonState() {
+        binding.btnErrorRetry.isEnabled = true
+        binding.btnErrorRetry.text = getString(R.string.btn_retry)
     }
 
     private fun showOfflineErrorScreen(detailMsg: String) {
+        isDeviceOnline = networkMonitor.currentState().first
         hasMainFrameError = true
+        isRetryingFromOffline = false
         hideSplashLoader()
+        resetRetryButtonState()
         binding.swipeRefresh.isRefreshing = false
+        binding.swipeRefresh.isEnabled = false
         binding.progressBar.visibility = View.GONE
+        binding.bannerOffline.visibility = View.GONE
+        binding.webView.visibility = View.INVISIBLE
         binding.layoutOfflineError.visibility = View.VISIBLE
-        binding.tvErrorServerDetail.text = "Target: ${prefs.getServerUrl()}"
-        binding.tvErrorMessage.text =
-            "Server tidak merespons ($detailMsg).\nPastikan internet HP aktif atau buka mode cache offline."
+
+        if (!isDeviceOnline) {
+            binding.tvOfflineStatusBadge.text = "●  TIDAK ADA KONEKSI INTERNET"
+            binding.tvErrorTitle.text = getString(R.string.offline_title)
+            binding.tvErrorMessage.text = getString(R.string.offline_subtitle)
+        } else {
+            binding.tvOfflineStatusBadge.text = "●  SERVER TIDAK TERJANGKAU"
+            binding.tvErrorTitle.text = getString(R.string.server_unreachable_title)
+            binding.tvErrorMessage.text =
+                "Jaringan terhubung, namun server WMVAA sedang tidak merespons atau alamat server berubah."
+        }
+
+        binding.tvErrorServerDetail.text = "Target: ${prefs.getServerUrl()}  •  Kode: $detailMsg"
+    }
+
+    private fun openNetworkSettings() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startActivity(Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY))
+            } else {
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            }
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
+            } catch (_: Exception) {
+                Toast.makeText(this, "Buka Pengaturan Wi-Fi / Data Seluler di HP Anda.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun clearStaleWebViewServiceWorkerData() {
@@ -608,11 +728,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackHandler() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (binding.layoutOfflineError.visibility == View.VISIBLE) {
-                    openServerSetup()
-                    return
-                }
-                if (binding.webView.canGoBack()) {
+                if (binding.layoutOfflineError.visibility != View.VISIBLE && binding.webView.canGoBack()) {
                     binding.webView.goBack()
                     return
                 }
@@ -639,6 +755,15 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         applyKeepScreenOnPreference()
+        if (::networkMonitor.isInitialized) {
+            val connected = networkMonitor.currentState().first
+            isDeviceOnline = connected
+            if (connected && hasMainFrameError) {
+                retryCurrentOrHome()
+            } else if (!connected && binding.layoutOfflineError.visibility != View.VISIBLE && binding.layoutSplashLoader.visibility != View.VISIBLE) {
+                binding.bannerOffline.visibility = View.VISIBLE
+            }
+        }
     }
 
     override fun onPause() {

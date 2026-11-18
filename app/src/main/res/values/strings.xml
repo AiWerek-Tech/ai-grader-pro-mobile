@@ -4,10 +4,11 @@
     <string name="server_setup_title">Pengaturan Server &amp; Hosting</string>
     <string name="connecting_to_server">Menghubungkan ke WMVAA Cloud Server...</string>
     <string name="offline_banner_text">Koneksi terputus • Draft scan lokal tetap aman</string>
-    <string name="offline_title">Koneksi Server Terputus</string>
-    <string name="offline_subtitle">Pastikan koneksi internet HP aktif atau server sekolah terjangkau.</string>
+    <string name="offline_title">Tidak Ada Koneksi Internet</string>
+    <string name="offline_subtitle">Perangkat Anda sedang tidak terhubung ke jaringan Wi-Fi atau data seluler.</string>
+    <string name="server_unreachable_title">Server Tidak Merespons</string>
     <string name="btn_retry">Coba Sambungkan Lagi</string>
-    <string name="btn_open_cache">Buka Cache Offline</string>
+    <string name="btn_wifi_settings">Pengaturan Wi-Fi / Internet</string>
     <string name="btn_change_server">Ganti Server / Scan QR</string>
     <string name="default_server_url">https://app.wmvaa.id/ai-grader</string>
 </resources>

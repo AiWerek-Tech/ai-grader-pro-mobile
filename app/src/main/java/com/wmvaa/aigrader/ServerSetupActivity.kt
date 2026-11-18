@@ -51,6 +51,7 @@ class ServerSetupActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityServerSetupBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.tvSetupVersion.text = "WMVAA AI Grader Pro v${BuildConfig.VERSION_NAME}"
 
         prefs = PrefsManager(this)
         isInitialSetup = intent.getBooleanExtra(EXTRA_INITIAL_SETUP, false)

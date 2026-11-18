@@ -34,24 +34,32 @@
         app:trackColor="#269333EA"
         app:trackThickness="3dp" />
 
-    <!-- Banner Status Offline Real-Time -->
+    <!-- Banner Status Offline Real-Time (di atas Bottom Nav agar tidak menutupi Topbar Web) -->
     <LinearLayout
         android:id="@+id/bannerOffline"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="top"
+        android:layout_gravity="bottom"
         android:layout_marginStart="12dp"
-        android:layout_marginTop="10dp"
         android:layout_marginEnd="12dp"
+        android:layout_marginBottom="92dp"
         android:background="@drawable/bg_offline_banner"
-        android:elevation="8dp"
+        android:elevation="10dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="14dp"
+        android:paddingStart="12dp"
         android:paddingTop="10dp"
-        android:paddingEnd="10dp"
+        android:paddingEnd="8dp"
         android:paddingBottom="10dp"
         android:visibility="gone">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginEnd="10dp"
+            android:contentDescription="@string/offline_title"
+            android:src="@drawable/ic_wifi_off"
+            app:tint="#050314" />
 
         <LinearLayout
             android:layout_width="0dp"
@@ -85,7 +93,7 @@
             android:minWidth="0dp"
             android:paddingStart="10dp"
             android:paddingEnd="10dp"
-            android:text="Coba Lagi"
+            android:text="Muat Ulang"
             android:textColor="@color/white"
             android:textSize="10sp"
             app:cornerRadius="10dp" />
@@ -104,6 +112,18 @@
             android:textSize="10sp"
             app:cornerRadius="10dp"
             app:strokeColor="#050314" />
+
+        <TextView
+            android:id="@+id/btnBannerDismiss"
+            android:layout_width="28dp"
+            android:layout_height="34dp"
+            android:layout_marginStart="2dp"
+            android:contentDescription="Tutup banner"
+            android:gravity="center"
+            android:text="✕"
+            android:textColor="#050314"
+            android:textSize="14sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
     <!-- Splash & Initial Loader Overlay -->
@@ -120,18 +140,20 @@
         android:visibility="visible">
 
         <ImageView
-            android:layout_width="240dp"
-            android:layout_height="135dp"
+            android:layout_width="match_parent"
+            android:layout_height="112dp"
+            android:adjustViewBounds="true"
             android:contentDescription="@string/app_name"
             android:scaleType="fitCenter"
             android:src="@drawable/wmvaa_logo_horizontal" />
 
         <TextView
+            android:id="@+id/tvSplashVersion"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:letterSpacing="0.18"
-            android:text="ENTERPRISE EDITION v2.0"
+            android:text="ENTERPRISE EDITION"
             android:textColor="@color/accent_cyan"
             android:textSize="10sp"
             android:textStyle="bold" />
@@ -183,7 +205,7 @@
             app:strokeColor="@color/border_subtle" />
     </LinearLayout>
 
-    <!-- Full Offline / Server Unreachable Recovery Screen -->
+    <!-- Full Dedicated Offline / Server Unreachable Recovery Page -->
     <ScrollView
         android:id="@+id/layoutOfflineError"
         android:layout_width="match_parent"
@@ -193,7 +215,7 @@
         android:clipToPadding="false"
         android:fillViewport="true"
         android:focusable="true"
-        android:paddingBottom="24dp"
+        android:paddingBottom="28dp"
         android:visibility="gone">
 
         <LinearLayout
@@ -201,31 +223,95 @@
             android:layout_height="wrap_content"
             android:gravity="center"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:paddingStart="20dp"
+            android:paddingTop="24dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="24dp">
 
+            <!-- Brand Mini Header -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="18dp"
+                android:background="@drawable/bg_badge_pill"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="14dp"
+                android:paddingBottom="6dp">
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:contentDescription="@string/app_name"
+                    android:src="@drawable/wmvaa_logo_symbol" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:letterSpacing="0.12"
+                    android:text="WMVAA AI GRADER PRO"
+                    android:textColor="@color/accent_cyan"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Main Offline Card -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_card_surface"
                 android:gravity="center_horizontal"
                 android:orientation="vertical"
-                android:padding="24dp">
+                android:paddingStart="22dp"
+                android:paddingTop="26dp"
+                android:paddingEnd="22dp"
+                android:paddingBottom="24dp">
 
-                <ImageView
-                    android:layout_width="76dp"
-                    android:layout_height="76dp"
-                    android:contentDescription="@string/app_name"
-                    android:src="@drawable/wmvaa_logo_symbol" />
+                <!-- Status Pill -->
+                <TextView
+                    android:id="@+id/tvOfflineStatusBadge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_status_pill_offline"
+                    android:letterSpacing="0.12"
+                    android:paddingStart="12dp"
+                    android:paddingTop="5dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="5dp"
+                    android:text="●  TIDAK ADA KONEKSI INTERNET"
+                    android:textColor="@color/accent_rose"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
 
+                <!-- Hero Disconnected Icon Badge -->
+                <FrameLayout
+                    android:layout_width="92dp"
+                    android:layout_height="92dp"
+                    android:layout_marginTop="20dp"
+                    android:background="@drawable/bg_offline_hero_ring">
+
+                    <ImageView
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@string/offline_title"
+                        android:src="@drawable/ic_wifi_off"
+                        app:tint="@color/white" />
+                </FrameLayout>
+
+                <!-- Title & Subtitle -->
                 <TextView
                     android:id="@+id/tvErrorTitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="18dp"
                     android:gravity="center"
                     android:text="@string/offline_title"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp"
+                    android:textSize="21sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -234,75 +320,113 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:gravity="center"
-                    android:lineSpacingExtra="3dp"
+                    android:lineSpacingExtra="4dp"
                     android:text="@string/offline_subtitle"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
-                <TextView
-                    android:id="@+id/tvErrorServerDetail"
+                <!-- Auto Reconnect Live Indicator -->
+                <LinearLayout
+                    android:id="@+id/layoutAutoReconnect"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:background="@drawable/bg_badge_pill"
-                    android:paddingStart="12dp"
-                    android:paddingTop="5dp"
-                    android:paddingEnd="12dp"
-                    android:paddingBottom="5dp"
-                    android:text="Target: https://app.wmvaa.id/ai-grader"
-                    android:textColor="@color/accent_amber"
-                    android:textSize="11sp"
-                    android:textStyle="bold" />
+                    android:layout_marginTop="14dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-                <!-- Troubleshooting Tips -->
+                    <com.google.android.material.progressindicator.CircularProgressIndicator
+                        android:id="@+id/progressAutoReconnect"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:indeterminate="true"
+                        app:indicatorColor="@color/accent_cyan"
+                        app:indicatorSize="14dp"
+                        app:trackColor="@color/border_subtle"
+                        app:trackThickness="2dp" />
+
+                    <TextView
+                        android:id="@+id/tvAutoReconnectHint"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Otomatis terhubung kembali saat sinyal aktif"
+                        android:textColor="@color/accent_cyan"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Data Safety Reassurance Card -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="18dp"
-                    android:background="@color/bg_surface"
-                    android:orientation="vertical"
-                    android:padding="14dp">
+                    android:background="@drawable/bg_safety_pill"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Checklist Koneksi:"
-                        android:textColor="@color/text_primary"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_marginEnd="10dp"
+                        android:contentDescription="Aman"
+                        android:src="@drawable/ic_shield_check" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:lineSpacingExtra="4dp"
-                        android:text="1. Pastikan internet / Wi-Fi HP aktif untuk mengakses Hosting Cloud (app.wmvaa.id/ai-grader)\n2. Jika memakai Server Lokal sekolah, pastikan terhubung ke Wi-Fi yang sama\n3. Gunakan tombol Scan QR / Ganti Server di bawah untuk beralih server"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp" />
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Draft Scan Lokal Tetap Aman"
+                            android:textColor="@color/accent_emerald"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:lineSpacingExtra="2dp"
+                            android:text="Foto &amp; antrean LJK yang belum tersimpan tetap tersimpan di memori perangkat."
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
                 </LinearLayout>
 
+                <!-- Action Buttons -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnErrorRetry"
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
+                    android:layout_height="52dp"
                     android:layout_marginTop="20dp"
                     android:backgroundTint="@color/accent_violet"
                     android:text="@string/btn_retry"
                     android:textColor="@color/white"
+                    android:textSize="14sp"
                     android:textStyle="bold"
                     app:cornerRadius="14dp" />
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnErrorOpenCache"
+                    android:id="@+id/btnErrorWifiSettings"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
-                    android:layout_height="46dp"
-                    android:layout_marginTop="8dp"
-                    android:backgroundTint="@color/bg_surface"
-                    android:text="@string/btn_open_cache"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:backgroundTint="#17123A"
+                    android:text="@string/btn_wifi_settings"
                     android:textColor="@color/accent_cyan"
+                    android:textSize="13sp"
                     android:textStyle="bold"
-                    app:cornerRadius="14dp" />
+                    app:cornerRadius="14dp"
+                    app:icon="@drawable/ic_wifi_settings"
+                    app:iconGravity="textStart"
+                    app:iconTint="@color/accent_cyan"
+                    app:strokeColor="@color/border_subtle"
+                    app:strokeWidth="1dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnErrorChangeServer"
@@ -312,8 +436,53 @@
                     android:layout_marginTop="8dp"
                     android:text="@string/btn_change_server"
                     android:textColor="@color/text_primary"
+                    android:textSize="13sp"
                     app:cornerRadius="14dp"
                     app:strokeColor="@color/border_subtle" />
+
+                <!-- Server Info & Quick Checklist -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:background="@drawable/bg_info_card_subtle"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Langkah Pemecahan Masalah:"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:lineSpacingExtra="4dp"
+                        android:text="• Aktifkan Wi-Fi atau Data Seluler melalui tombol di atas\n• Jika memakai server lokal sekolah, pastikan terhubung ke Wi-Fi sekolah\n• Ketuk &quot;Ganti Server / Scan QR&quot; jika alamat server berubah"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11.5sp" />
+
+                    <TextView
+                        android:id="@+id/tvErrorServerDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/bg_badge_pill"
+                        android:ellipsize="middle"
+                        android:paddingStart="10dp"
+                        android:paddingTop="5dp"
+                        android:paddingEnd="10dp"
+                        android:paddingBottom="5dp"
+                        android:singleLine="true"
+                        android:text="Target: https://app.wmvaa.id/ai-grader"
+                        android:textColor="@color/accent_amber"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

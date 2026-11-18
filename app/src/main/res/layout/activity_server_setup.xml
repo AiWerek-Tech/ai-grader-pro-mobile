@@ -21,8 +21,8 @@
         android:paddingBottom="14dp">
 
         <ImageView
-            android:layout_width="42dp"
-            android:layout_height="42dp"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
             android:contentDescription="@string/app_name"
             android:src="@drawable/wmvaa_logo" />
 
@@ -42,9 +42,10 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/tvSetupVersion"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="WMVAA AI Grader Pro v2.0"
+                android:text="WMVAA AI Grader Pro"
                 android:textColor="@color/accent_cyan"
                 android:textSize="11sp"
                 android:textStyle="bold" />
@@ -378,7 +379,12 @@
                         android:id="@+id/btnClearHistory"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:padding="4dp"
+                        android:minHeight="36dp"
+                        android:gravity="center"
+                        android:paddingStart="10dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="10dp"
+                        android:paddingBottom="6dp"
                         android:text="Bersihkan"
                         android:textColor="@color/accent_rose"
                         android:textSize="11sp"
