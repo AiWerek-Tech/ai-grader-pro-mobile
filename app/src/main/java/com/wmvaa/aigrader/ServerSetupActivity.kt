@@ -3,7 +3,10 @@ package com.wmvaa.aigrader
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.LinearLayout
@@ -17,12 +20,31 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.wmvaa.aigrader.databinding.ActivityServerSetupBinding
 import kotlinx.coroutines.launch
+import java.io.File
 
 class ServerSetupActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityServerSetupBinding
     private lateinit var prefs: PrefsManager
     private var isInitialSetup = false
+    private var pendingInstallApkFile: File? = null
+
+    private val unknownSourcesLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            val apk = pendingInstallApkFile
+            pendingInstallApkFile = null
+            if (apk != null && apk.exists()) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
+                    UpdateChecker.installApkFile(this, apk) { requestUnknownSourcesAndInstall(it) }
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Izin 'Instal aplikasi yang tidak dikenal' belum diaktifkan.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
 
     private val qrLauncher = registerForActivityResult(ScanContract()) { result ->
         val contents = result.contents?.trim()
@@ -112,7 +134,63 @@ class ServerSetupActivity : AppCompatActivity() {
             verifyAndSave(input, null)
         }
 
+        binding.btnCheckAppUpdate.setOnClickListener {
+            runManualUpdateCheck()
+        }
+
         renderHistory()
+    }
+
+    private fun requestUnknownSourcesAndInstall(apkFile: File) {
+        pendingInstallApkFile = apkFile
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName")
+                )
+                unknownSourcesLauncher.launch(intent)
+            } catch (_: Exception) {
+                unknownSourcesLauncher.launch(Intent(Settings.ACTION_SECURITY_SETTINGS))
+            }
+        }
+    }
+
+    private fun runManualUpdateCheck() {
+        binding.btnCheckAppUpdate.isEnabled = false
+        binding.tvUpdateCheckStatus.setTextColor(getColor(R.color.text_secondary))
+        binding.tvUpdateCheckStatus.text = "Memeriksa rilis terbaru di GitHub..."
+
+        lifecycleScope.launch {
+            val update = UpdateChecker.checkForUpdate(BuildConfig.VERSION_NAME)
+            binding.btnCheckAppUpdate.isEnabled = true
+
+            if (update == null) {
+                binding.tvUpdateCheckStatus.setTextColor(getColor(R.color.accent_emerald))
+                binding.tvUpdateCheckStatus.text =
+                    "✓ Aplikasi Anda sudah menggunakan versi terbaru (v${BuildConfig.VERSION_NAME})."
+                Toast.makeText(
+                    this@ServerSetupActivity,
+                    "Sudah menggunakan versi terbaru (v${BuildConfig.VERSION_NAME})",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
+
+            binding.tvUpdateCheckStatus.setTextColor(getColor(R.color.accent_cyan))
+            binding.tvUpdateCheckStatus.text =
+                "Tersedia versi baru v${update.versionName}! Ketuk tombol untuk memperbarui."
+
+            UpdateChecker.showUpdateDialog(
+                activity = this@ServerSetupActivity,
+                prefs = prefs,
+                update = update,
+                isManualCheck = true,
+                onNeedUnknownSourcesPermission = { apkFile ->
+                    requestUnknownSourcesAndInstall(apkFile)
+                }
+            )
+        }
     }
 
     private fun launchQrScanner() {

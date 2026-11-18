@@ -60,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingCameraImageUri: Uri? = null
     private var pendingWebPermissionRequest: PermissionRequest? = null
     private var pendingStorageAction: (() -> Unit)? = null
+    private var pendingInstallApkFile: File? = null
 
     private var pendingChooserAllowMultiple = true
     private var pendingChooserForceCamera = false
@@ -162,6 +163,23 @@ class MainActivity : AppCompatActivity() {
                     "Izin penyimpanan diperlukan pada Android 7–9 untuk menyimpan file ke Downloads.",
                     Toast.LENGTH_LONG
                 ).show()
+            }
+        }
+
+    private val unknownSourcesLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            val apk = pendingInstallApkFile
+            pendingInstallApkFile = null
+            if (apk != null && apk.exists()) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls()) {
+                    UpdateChecker.installApkFile(this, apk) { requestUnknownSourcesAndInstall(it) }
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Izin 'Instal aplikasi yang tidak dikenal' belum diaktifkan.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
 
@@ -802,6 +820,7 @@ class MainActivity : AppCompatActivity() {
     private fun cleanupOldCameraCaptures() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                UpdateChecker.cleanupOldUpdateApks(this@MainActivity)
                 val dir = File(cacheDir, "ljk_captures")
                 if (!dir.exists()) return@launch
                 val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
@@ -815,6 +834,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun requestUnknownSourcesAndInstall(apkFile: File) {
+        pendingInstallApkFile = apkFile
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName")
+                )
+                unknownSourcesLauncher.launch(intent)
+            } catch (_: Exception) {
+                unknownSourcesLauncher.launch(Intent(Settings.ACTION_SECURITY_SETTINGS))
+            }
+        }
+    }
+
     private fun checkAppUpdateInBackground() {
         lifecycleScope.launch {
             if (!networkMonitor.currentState().first) return@launch
@@ -822,31 +856,15 @@ class MainActivity : AppCompatActivity() {
             if (prefs.getDismissedUpdateVersion() == update.versionName) return@launch
             if (isFinishing || isDestroyed) return@launch
 
-            val summary = update.releaseNotes
-                .lineSequence()
-                .filter { it.isNotBlank() && !it.startsWith("#") }
-                .take(4)
-                .joinToString("\n")
-                .ifBlank { "Versi terbaru dengan peningkatan stabilitas dan fitur baru telah tersedia." }
-
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle("Pembaruan Aplikasi v${update.versionName}")
-                .setMessage("Versi terbaru WMVAA AI Grader Pro (v${update.versionName}) tersedia.\n\n$summary")
-                .setPositiveButton("Unduh Update") { _, _ ->
-                    ensureLegacyStoragePermission {
-                        enqueueDownload(
-                            url = update.downloadUrl,
-                            userAgent = "WMVAA-Android-Wrapper/${BuildConfig.VERSION_NAME}",
-                            contentDisposition = "attachment; filename=wmvaa-ai-grader-pro-v${update.versionName}-android.apk",
-                            mimetype = "application/vnd.android.package-archive"
-                        )
-                    }
+            UpdateChecker.showUpdateDialog(
+                activity = this@MainActivity,
+                prefs = prefs,
+                update = update,
+                isManualCheck = false,
+                onNeedUnknownSourcesPermission = { apkFile ->
+                    requestUnknownSourcesAndInstall(apkFile)
                 }
-                .setNeutralButton("Nanti Saja") { _, _ ->
-                    prefs.setDismissedUpdateVersion(update.versionName)
-                }
-                .setNegativeButton("Tutup", null)
-                .show()
+            )
         }
     }
 
