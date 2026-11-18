@@ -9,6 +9,7 @@
     <string name="server_unreachable_title">Server Tidak Merespons</string>
     <string name="btn_retry">Coba Sambungkan Lagi</string>
     <string name="btn_wifi_settings">Pengaturan Wi-Fi / Internet</string>
+    <string name="btn_open_cache">Buka Draft / Cache Offline</string>
     <string name="btn_change_server">Ganti Server / Scan QR</string>
     <string name="default_server_url">https://app.wmvaa.id/ai-grader</string>
 </resources>

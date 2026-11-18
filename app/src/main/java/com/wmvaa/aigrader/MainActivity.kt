@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.net.http.SslCertificate
 import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
@@ -18,8 +19,8 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.view.View
 import android.view.WindowManager
-import android.webkit.CookieManager
 import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
@@ -39,8 +40,12 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.lifecycleScope
 import com.wmvaa.aigrader.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,6 +59,11 @@ class MainActivity : AppCompatActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var pendingCameraImageUri: Uri? = null
     private var pendingWebPermissionRequest: PermissionRequest? = null
+    private var pendingStorageAction: (() -> Unit)? = null
+
+    private var pendingChooserAllowMultiple = true
+    private var pendingChooserForceCamera = false
+    private var pendingChooserAcceptTypes: Array<String> = emptyArray()
 
     private var hasMainFrameError = false
     private var isRetryingFromOffline = false
@@ -62,15 +72,14 @@ class MainActivity : AppCompatActivity() {
     private var isWebPullToRefreshAllowed = true
     private var lastTargetUrl = ""
     private var lastBackPressedMs = 0L
-    private var lastRenderCrashMs = 0L
-    private var renderCrashCount = 0
-    private val trustedLanHosts = mutableSetOf<String>()
+    private val trustedLanHostsSession = mutableSetOf<String>()
     private val splashTimeoutHandler = Handler(Looper.getMainLooper())
 
     private val setupLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                 applyKeepScreenOnPreference()
+                applyDynamicMixedContentPolicy()
                 loadConfiguredServer(forceNetwork = true)
             }
         }
@@ -111,10 +120,24 @@ class MainActivity : AppCompatActivity() {
     private val cameraForFileChooserPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
-                launchChooserWithCamera(allowMultiple = true, forceCameraOnly = false)
+                launchChooserWithCamera(
+                    allowMultiple = pendingChooserAllowMultiple,
+                    forceCameraOnly = pendingChooserForceCamera,
+                    acceptTypes = pendingChooserAcceptTypes
+                )
+            } else if (pendingChooserForceCamera) {
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = null
+                Toast.makeText(
+                    this,
+                    "Izin kamera diperlukan untuk mengambil foto LJK.",
+                    Toast.LENGTH_SHORT
+                ).show()
             } else {
-                // Tetap buka galeri jika izin kamera ditolak
-                launchGalleryOnlyChooser(allowMultiple = true)
+                launchGalleryOnlyChooser(
+                    allowMultiple = pendingChooserAllowMultiple,
+                    acceptTypes = pendingChooserAcceptTypes
+                )
             }
         }
 
@@ -127,14 +150,30 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private val storagePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val action = pendingStorageAction
+            pendingStorageAction = null
+            if (granted) {
+                action?.invoke()
+            } else {
+                Toast.makeText(
+                    this,
+                    "Izin penyimpanan diperlukan pada Android 7–9 untuk menyimpan file ke Downloads.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PrefsManager(this)
 
-        // Jika belum ada server tersimpan, otomatis gunakan Hosting Cloud Resmi (https://app.wmvaa.id/ai-grader)
         if (!prefs.hasConfiguredServer()) {
             prefs.setServerUrl(PrefsManager.DEFAULT_URL)
         }
+
+        handleDeepLinkIntent(intent, loadImmediately = false)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -145,6 +184,8 @@ class MainActivity : AppCompatActivity() {
         setupUiActions()
         setupBackHandler()
         setupNetworkMonitor()
+        cleanupOldCameraCaptures()
+        checkAppUpdateInBackground()
 
         if (savedInstanceState != null) {
             binding.webView.restoreState(savedInstanceState)
@@ -157,11 +198,52 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLinkIntent(intent, loadImmediately = true)
+    }
+
+    private fun handleDeepLinkIntent(incomingIntent: Intent?, loadImmediately: Boolean) {
+        val dataUri = incomingIntent?.data ?: return
+        val raw = dataUri.toString()
+        if (raw.isBlank()) return
+        val baseUrl = PrefsManager.normalizeBaseUrl(raw)
+        val path = PrefsManager.extractPathOrNull(raw)
+        prefs.setServerUrl(baseUrl, path)
+        if (loadImmediately && ::binding.isInitialized) {
+            applyDynamicMixedContentPolicy()
+            loadConfiguredServer(forceNetwork = true)
+        }
+    }
+
     private fun applyKeepScreenOnPreference() {
         if (prefs.isKeepScreenOn()) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun applyDynamicMixedContentPolicy() {
+        val host = Uri.parse(prefs.getServerUrl()).host.orEmpty()
+        binding.webView.settings.mixedContentMode =
+            if (PrefsManager.isPrivateLanIp(host)) {
+                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            } else {
+                WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            }
+    }
+
+    private fun ensureLegacyStoragePermission(onGranted: () -> Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            onGranted()
+        } else {
+            pendingStorageAction = onGranted
+            storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 
@@ -206,11 +288,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnErrorRetry.setOnClickListener { retryCurrentOrHome() }
         binding.btnErrorWifiSettings.setOnClickListener { openNetworkSettings() }
         binding.btnErrorChangeServer.setOnClickListener { openServerSetup() }
+        binding.btnErrorOpenOfflineCache.setOnClickListener { openCachedOfflinePage() }
     }
 
     private fun setupNetworkMonitor() {
         networkMonitor = NetworkMonitor(this) { connected, _ ->
-            val wasOffline = !isDeviceOnline
             isDeviceOnline = connected
             if (connected) {
                 offlineBannerDismissed = false
@@ -223,8 +305,7 @@ class MainActivity : AppCompatActivity() {
                     binding.layoutSplashLoader.visibility != View.VISIBLE
                 ) View.VISIBLE else View.GONE
 
-            // Auto-reconnect otomatis ketika Wi-Fi / internet tersambung kembali
-            if (connected && (wasOffline || hasMainFrameError) && hasMainFrameError) {
+            if (connected && hasMainFrameError) {
                 retryCurrentOrHome()
             }
         }
@@ -249,7 +330,7 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
-            allowFileAccess = true
+            allowFileAccess = false
             allowContentAccess = true
             mediaPlaybackRequiresUserGesture = false
             javaScriptCanOpenWindowsAutomatically = true
@@ -258,21 +339,25 @@ class MainActivity : AppCompatActivity() {
             useWideViewPort = true
             builtInZoomControls = false
             displayZoomControls = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = "$userAgentString WMVAA-Android-Wrapper/${BuildConfig.VERSION_NAME}"
         }
+        applyDynamicMixedContentPolicy()
 
         binding.webView.addJavascriptInterface(
             NativeWebBridge(
                 activity = this,
                 webView = binding.webView,
+                prefs = prefs,
                 onOpenServerSettings = { openServerSetup() },
                 onSetSwipeRefreshEnabled = { allowed ->
                     isWebPullToRefreshAllowed = allowed
                     binding.swipeRefresh.isEnabled = allowed &&
                         binding.layoutOfflineError.visibility != View.VISIBLE &&
                         binding.layoutSplashLoader.visibility != View.VISIBLE
+                },
+                onEnsureStoragePermission = { action ->
+                    ensureLegacyStoragePermission(action)
                 }
             ),
             "WMVAANative"
@@ -283,31 +368,19 @@ class MainActivity : AppCompatActivity() {
                 // Blob ditangani oleh PwaOfflineBridge -> WMVAANative.saveBase64File
                 return@setDownloadListener
             }
-            try {
-                val request = DownloadManager.Request(Uri.parse(url)).apply {
-                    setMimeType(mimetype)
-                    addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url))
-                    addRequestHeader("User-Agent", userAgent)
-                    setDescription("Mengunduh file dari WMVAA AI Grader Pro")
-                    val filename = URLUtil.guessFileName(url, contentDisposition, mimetype)
-                    setTitle(filename)
-                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
-                }
-                val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-                dm.enqueue(request)
-                Toast.makeText(this, "Mengunduh file ke folder Downloads...", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(this, "Gagal mengunduh: ${e.message}", Toast.LENGTH_SHORT).show()
+            ensureLegacyStoragePermission {
+                enqueueDownload(url, userAgent, contentDisposition, mimetype)
             }
         }
 
         binding.webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                android.util.Log.d(
-                    "WMVAA_WEB",
-                    "CONSOLE [${consoleMessage?.messageLevel()}] ${consoleMessage?.message()} (${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()})"
-                )
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d(
+                        "WMVAA_WEB",
+                        "CONSOLE [${consoleMessage?.messageLevel()}] ${consoleMessage?.message()} (${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()})"
+                    )
+                }
                 return super.onConsoleMessage(consoleMessage)
             }
 
@@ -352,13 +425,26 @@ class MainActivity : AppCompatActivity() {
 
                 val allowMultiple = fileChooserParams?.mode == FileChooserParams.MODE_OPEN_MULTIPLE
                 val forceCameraOnly = fileChooserParams?.isCaptureEnabled == true
+                val acceptTypes = fileChooserParams?.acceptTypes
+                    ?.filter { it.isNotBlank() }
+                    ?.toTypedArray()
+                    ?: emptyArray()
+
+                pendingChooserAllowMultiple = allowMultiple
+                pendingChooserForceCamera = forceCameraOnly
+                pendingChooserAcceptTypes = acceptTypes
+
+                val wantsImageOrCamera = forceCameraOnly || acceptsImages(acceptTypes)
+
+                if (!wantsImageOrCamera) {
+                    launchGalleryOnlyChooser(allowMultiple, acceptTypes)
+                    return true
+                }
 
                 if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.CAMERA)
                     == PackageManager.PERMISSION_GRANTED
                 ) {
-                    launchChooserWithCamera(allowMultiple, forceCameraOnly)
-                } else if (forceCameraOnly) {
-                    cameraForFileChooserPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    launchChooserWithCamera(allowMultiple, forceCameraOnly, acceptTypes)
                 } else {
                     cameraForFileChooserPermissionLauncher.launch(Manifest.permission.CAMERA)
                 }
@@ -379,9 +465,17 @@ class MainActivity : AppCompatActivity() {
                     if (targetHost == configuredHost || (targetHost != null && PrefsManager.isPrivateLanIp(targetHost))) {
                         return false
                     }
-                    // Link eksternal (misal Drive/WhatsApp) buka di browser sistem
-                    startActivity(Intent(Intent.ACTION_VIEW, url))
-                    return true
+                    return try {
+                        startActivity(Intent(Intent.ACTION_VIEW, url))
+                        true
+                    } catch (_: Exception) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Tidak ada browser ditemukan untuk membuka tautan eksternal.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        true
+                    }
                 }
                 return try {
                     startActivity(Intent(Intent.ACTION_VIEW, url))
@@ -393,9 +487,10 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                android.util.Log.d("WMVAA_WEB", "onPageStarted url=$url hasMainFrameError=$hasMainFrameError")
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d("WMVAA_WEB", "onPageStarted url=$url hasMainFrameError=$hasMainFrameError")
+                }
 
-                // Jangan pernah sembunyikan halaman offline atau tampilkan halaman error bawaan Chromium
                 if (url.isNullOrBlank() || url.startsWith("chrome-error://") || url == "about:blank") {
                     if (hasMainFrameError || url?.startsWith("chrome-error://") == true) {
                         binding.webView.visibility = View.INVISIBLE
@@ -417,7 +512,12 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                android.util.Log.d("WMVAA_WEB", "onPageFinished url=$url title=${view?.title} crashCount=$renderCrashCount hasMainFrameError=$hasMainFrameError")
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.d(
+                        "WMVAA_WEB",
+                        "onPageFinished url=$url title=${view?.title} crashCount=$renderCrashCount hasMainFrameError=$hasMainFrameError"
+                    )
+                }
                 CookieManager.getInstance().flush()
                 binding.swipeRefresh.isRefreshing = false
                 binding.progressBar.visibility = View.GONE
@@ -435,7 +535,8 @@ class MainActivity : AppCompatActivity() {
                     hideSplashLoader()
                     binding.layoutOfflineError.visibility = View.GONE
                     binding.webView.visibility = View.VISIBLE
-                    binding.bannerOffline.visibility = if (isDeviceOnline) View.GONE else View.VISIBLE
+                    binding.bannerOffline.visibility =
+                        if (!isDeviceOnline && !offlineBannerDismissed) View.VISIBLE else View.GONE
                     binding.swipeRefresh.isEnabled = isWebPullToRefreshAllowed
                 }
             }
@@ -444,16 +545,19 @@ class MainActivity : AppCompatActivity() {
                 view: WebView?,
                 detail: RenderProcessGoneDetail?
             ): Boolean {
-                android.util.Log.e("WMVAA_WEB", "onRenderProcessGone didCrash=${detail?.didCrash()} priority=${detail?.rendererPriorityAtExit()}")
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.e(
+                        "WMVAA_WEB",
+                        "onRenderProcessGone didCrash=${detail?.didCrash()} priority=${detail?.rendererPriorityAtExit()}"
+                    )
+                }
                 val now = System.currentTimeMillis()
-                renderCrashCount = if (now - lastRenderCrashMs < 10000L) renderCrashCount + 1 else 1
+                renderCrashCount = if (now - lastRenderCrashMs < 15000L) renderCrashCount + 1 else 1
                 lastRenderCrashMs = now
 
                 if (renderCrashCount <= 1) {
-                    // Pulihkan instance WebView secara otomatis pada crash pertama
                     recreate()
                 } else {
-                    // Cegah crash loop berulang: tampilkan layar pemulihan ramah pengguna
                     showOfflineErrorScreen("RENDERER_CRASHED")
                 }
                 return true
@@ -465,7 +569,12 @@ class MainActivity : AppCompatActivity() {
                 error: WebResourceError?
             ) {
                 super.onReceivedError(view, request, error)
-                android.util.Log.e("WMVAA_WEB", "onReceivedError main=${request?.isForMainFrame} url=${request?.url} code=${error?.errorCode} desc=${error?.description}")
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.e(
+                        "WMVAA_WEB",
+                        "onReceivedError main=${request?.isForMainFrame} url=${request?.url} code=${error?.errorCode} desc=${error?.description}"
+                    )
+                }
                 if (request?.isForMainFrame == true) {
                     isRetryingFromOffline = false
                     view?.stopLoading()
@@ -501,15 +610,28 @@ class MainActivity : AppCompatActivity() {
                     handler?.cancel()
                     return
                 }
-                if (trustedLanHosts.contains(host)) {
+                val certFingerprint = extractSslCertificateSha256(error?.certificate)
+                if ((certFingerprint.isNotBlank() && prefs.isTrustedLanCert(host, certFingerprint)) ||
+                    trustedLanHostsSession.contains(host)
+                ) {
                     handler?.proceed()
                     return
                 }
+                val shortFp = if (certFingerprint.length >= 16) {
+                    certFingerprint.take(16).chunked(2).joinToString(":") + "..."
+                } else {
+                    "Self-Signed LAN"
+                }
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("Sertifikat HTTPS Lokal Sekolah")
-                    .setMessage("Server lokal ($host) menggunakan sertifikat HTTPS lokal untuk mengaktifkan Live Kamera Viewfinder. Lanjutkan koneksi ke server sekolah?")
+                    .setMessage(
+                        "Server lokal ($host) menggunakan sertifikat HTTPS lokal ($shortFp) untuk mengaktifkan Live Kamera Viewfinder.\n\nLanjutkan koneksi ke server sekolah ini?"
+                    )
                     .setPositiveButton("Izinkan Server Ini") { _, _ ->
-                        trustedLanHosts.add(host)
+                        trustedLanHostsSession.add(host)
+                        if (certFingerprint.isNotBlank()) {
+                            prefs.addTrustedLanCert(host, certFingerprint)
+                        }
                         handler?.proceed()
                     }
                     .setNegativeButton("Batal") { _, _ ->
@@ -521,7 +643,97 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun launchChooserWithCamera(allowMultiple: Boolean, forceCameraOnly: Boolean) {
+    private fun extractSslCertificateSha256(sslCert: SslCertificate?): String {
+        if (sslCert == null) return ""
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val x509 = sslCert.x509Certificate
+                if (x509 != null) {
+                    val digest = MessageDigest.getInstance("SHA-256").digest(x509.encoded)
+                    return digest.joinToString("") { "%02X".format(it) }
+                }
+            }
+            val bundle = SslCertificate.saveState(sslCert)
+            val bytes = bundle?.getByteArray("x509-certificate") ?: return ""
+            val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+            digest.joinToString("") { "%02X".format(it) }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun enqueueDownload(
+        url: String,
+        userAgent: String,
+        contentDisposition: String,
+        mimetype: String
+    ) {
+        try {
+            val filename = URLUtil.guessFileName(url, contentDisposition, mimetype)
+            val request = DownloadManager.Request(Uri.parse(url)).apply {
+                setMimeType(mimetype)
+                CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
+                addRequestHeader("User-Agent", userAgent)
+                setDescription("Mengunduh file dari WMVAA AI Grader Pro")
+                setTitle(filename)
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+            }
+            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(request)
+            Toast.makeText(this, "Mengunduh $filename ke folder Downloads...", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Gagal mengunduh: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun acceptsImages(acceptTypes: Array<String>): Boolean {
+        if (acceptTypes.isEmpty()) return true
+        return acceptTypes.any { raw ->
+            val t = raw.trim().lowercase()
+            t.isEmpty() ||
+                t == "*/*" ||
+                t.startsWith("image/") ||
+                t.endsWith(".jpg") ||
+                t.endsWith(".jpeg") ||
+                t.endsWith(".png") ||
+                t.endsWith(".webp")
+        }
+    }
+
+    private fun resolveMimeFilter(acceptTypes: Array<String>): Pair<String, Array<String>?> {
+        val cleaned = acceptTypes
+            .flatMap { it.split(",") }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        if (cleaned.isEmpty()) return "image/*" to null
+
+        val mimeList = cleaned.mapNotNull { token ->
+            when {
+                token.contains("/") -> token
+                token.equals(".xlsx", true) -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                token.equals(".xls", true) -> "application/vnd.ms-excel"
+                token.equals(".csv", true) -> "text/csv"
+                token.equals(".pdf", true) -> "application/pdf"
+                token.equals(".docx", true) -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                token.equals(".jpg", true) || token.equals(".jpeg", true) -> "image/jpeg"
+                token.equals(".png", true) -> "image/png"
+                else -> null
+            }
+        }.distinct()
+
+        return when {
+            mimeList.isEmpty() -> "*/*" to null
+            mimeList.size == 1 -> mimeList.first() to null
+            else -> "*/*" to mimeList.toTypedArray()
+        }
+    }
+
+    private fun launchChooserWithCamera(
+        allowMultiple: Boolean,
+        forceCameraOnly: Boolean,
+        acceptTypes: Array<String>
+    ) {
         try {
             val captureUri = createTempCameraImageUri()
             pendingCameraImageUri = captureUri
@@ -536,34 +748,42 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
+            val (primaryType, extraMimes) = resolveMimeFilter(acceptTypes)
             val galleryIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
-                type = "image/*"
+                type = primaryType
+                if (extraMimes != null) {
+                    putExtra(Intent.EXTRA_MIME_TYPES, extraMimes)
+                }
                 if (allowMultiple) {
                     putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 }
             }
 
-            val chooser = Intent.createChooser(galleryIntent, "Pilih Foto LJK atau Ambil Kamera").apply {
+            val chooser = Intent.createChooser(galleryIntent, "Pilih File atau Ambil Foto Kamera").apply {
                 putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(cameraIntent))
             }
             filePickerLauncher.launch(chooser)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             pendingCameraImageUri = null
-            launchGalleryOnlyChooser(allowMultiple)
+            launchGalleryOnlyChooser(allowMultiple, acceptTypes)
         }
     }
 
-    private fun launchGalleryOnlyChooser(allowMultiple: Boolean) {
+    private fun launchGalleryOnlyChooser(allowMultiple: Boolean, acceptTypes: Array<String>) {
         try {
+            val (primaryType, extraMimes) = resolveMimeFilter(acceptTypes)
             val galleryIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
-                type = "image/*"
+                type = primaryType
+                if (extraMimes != null) {
+                    putExtra(Intent.EXTRA_MIME_TYPES, extraMimes)
+                }
                 if (allowMultiple) {
                     putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
                 }
             }
-            filePickerLauncher.launch(Intent.createChooser(galleryIntent, "Pilih Gambar LJK"))
+            filePickerLauncher.launch(Intent.createChooser(galleryIntent, "Pilih File"))
         } catch (_: Exception) {
             filePathCallback?.onReceiveValue(null)
             filePathCallback = null
@@ -577,6 +797,57 @@ class MainActivity : AppCompatActivity() {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val imageFile = File.createTempFile("LJK_${stamp}_", ".jpg", dir)
         return FileProvider.getUriForFile(this, "${BuildConfig.APPLICATION_ID}.fileprovider", imageFile)
+    }
+
+    private fun cleanupOldCameraCaptures() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val dir = File(cacheDir, "ljk_captures")
+                if (!dir.exists()) return@launch
+                val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+                dir.listFiles()?.forEach { file ->
+                    if (file.isFile && file.lastModified() < cutoff) {
+                        file.delete()
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun checkAppUpdateInBackground() {
+        lifecycleScope.launch {
+            if (!networkMonitor.currentState().first) return@launch
+            val update = UpdateChecker.checkForUpdate(BuildConfig.VERSION_NAME) ?: return@launch
+            if (prefs.getDismissedUpdateVersion() == update.versionName) return@launch
+            if (isFinishing || isDestroyed) return@launch
+
+            val summary = update.releaseNotes
+                .lineSequence()
+                .filter { it.isNotBlank() && !it.startsWith("#") }
+                .take(4)
+                .joinToString("\n")
+                .ifBlank { "Versi terbaru dengan peningkatan stabilitas dan fitur baru telah tersedia." }
+
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Pembaruan Aplikasi v${update.versionName}")
+                .setMessage("Versi terbaru WMVAA AI Grader Pro (v${update.versionName}) tersedia.\n\n$summary")
+                .setPositiveButton("Unduh Update") { _, _ ->
+                    ensureLegacyStoragePermission {
+                        enqueueDownload(
+                            url = update.downloadUrl,
+                            userAgent = "WMVAA-Android-Wrapper/${BuildConfig.VERSION_NAME}",
+                            contentDisposition = "attachment; filename=wmvaa-ai-grader-pro-v${update.versionName}-android.apk",
+                            mimetype = "application/vnd.android.package-archive"
+                        )
+                    }
+                }
+                .setNeutralButton("Nanti Saja") { _, _ ->
+                    prefs.setDismissedUpdateVersion(update.versionName)
+                }
+                .setNegativeButton("Tutup", null)
+                .show()
+        }
     }
 
     private fun loadConfiguredServer(forceNetwork: Boolean) {
@@ -615,6 +886,16 @@ class MainActivity : AppCompatActivity() {
         binding.webView.loadUrl(fullUrl)
     }
 
+    private fun openCachedOfflinePage() {
+        val offlineUrl = "${prefs.getServerUrl()}/offline"
+        hasMainFrameError = false
+        isRetryingFromOffline = false
+        binding.layoutOfflineError.visibility = View.GONE
+        binding.webView.visibility = View.VISIBLE
+        binding.webView.settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
+        binding.webView.loadUrl(offlineUrl)
+    }
+
     private fun retryCurrentOrHome() {
         isDeviceOnline = networkMonitor.currentState().first
         val fallbackUrl = "${prefs.getServerUrl()}${prefs.getStartPath()}"
@@ -636,7 +917,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Pertahankan layar offline selama proses menyambung ulang agar halaman error bawaan Chromium tidak pernah terlihat
         hasMainFrameError = false
         isRetryingFromOffline = true
         binding.btnErrorRetry.isEnabled = false
@@ -754,21 +1034,31 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::binding.isInitialized) {
+            binding.webView.onResume()
+        }
         applyKeepScreenOnPreference()
         if (::networkMonitor.isInitialized) {
             val connected = networkMonitor.currentState().first
             isDeviceOnline = connected
             if (connected && hasMainFrameError) {
                 retryCurrentOrHome()
-            } else if (!connected && binding.layoutOfflineError.visibility != View.VISIBLE && binding.layoutSplashLoader.visibility != View.VISIBLE) {
+            } else if (!connected &&
+                !offlineBannerDismissed &&
+                binding.layoutOfflineError.visibility != View.VISIBLE &&
+                binding.layoutSplashLoader.visibility != View.VISIBLE
+            ) {
                 binding.bannerOffline.visibility = View.VISIBLE
             }
         }
     }
 
     override fun onPause() {
-        super.onPause()
+        if (::binding.isInitialized) {
+            binding.webView.onPause()
+        }
         CookieManager.getInstance().flush()
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -776,6 +1066,20 @@ class MainActivity : AppCompatActivity() {
         if (::networkMonitor.isInitialized) {
             networkMonitor.stop()
         }
+        if (::binding.isInitialized) {
+            try {
+                binding.swipeRefresh.removeView(binding.webView)
+                binding.webView.stopLoading()
+                binding.webView.webChromeClient = null
+                binding.webView.destroy()
+            } catch (_: Exception) {
+            }
+        }
         super.onDestroy()
+    }
+
+    companion object {
+        private var lastRenderCrashMs = 0L
+        private var renderCrashCount = 0
     }
 }

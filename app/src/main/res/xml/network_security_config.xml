@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Izinkan trafik HTTP lokal (LAN Wi-Fi Sekolah) & sertifikat lokal self-signed -->
+    <!-- Wajibkan HTTPS murni dengan sertifikat sistem resmi untuk domain Cloud WMVAA -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">wmvaa.id</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Izinkan trafik HTTP lokal (IP LAN Wi-Fi Sekolah) & CA lokal untuk mode ujian offline sekolah -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />

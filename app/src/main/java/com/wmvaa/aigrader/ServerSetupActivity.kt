@@ -123,6 +123,7 @@ class ServerSetupActivity : AppCompatActivity() {
             setBeepEnabled(true)
             setBarcodeImageEnabled(false)
             setOrientationLocked(true)
+            captureActivity = QrCaptureActivity::class.java
         }
         qrLauncher.launch(options)
     }
@@ -199,8 +200,8 @@ class ServerSetupActivity : AppCompatActivity() {
             val res = LanServerDiscovery.testServer(normalized, timeoutMs = 6000)
             binding.btnSaveAndConnect.isEnabled = true
 
-            res.onSuccess {
-                saveAndProceed(normalized, startPath)
+            res.onSuccess { srv ->
+                saveAndProceed(srv.url, startPath)
             }.onFailure {
                 // Tetap simpan jika guru ingin menyimpan IP meski server baru dinyalakan / offline mode
                 saveAndProceed(normalized, startPath)

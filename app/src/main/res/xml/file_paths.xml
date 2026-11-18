@@ -4,4 +4,5 @@
     <external-cache-path name="ljk_captures_ext" path="ljk_captures/" />
     <files-path name="internal_files" path="." />
     <external-files-path name="external_files" path="." />
+    <external-path name="public_downloads" path="Download/WMVAA-Grader/" />
 </paths>

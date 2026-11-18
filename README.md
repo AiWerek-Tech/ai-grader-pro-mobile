@@ -1,6 +1,6 @@
 # WMVAA AI Grader Pro — Android Mobile App (Kotlin)
 
-Aplikasi Android native berbasis Kotlin untuk **WMVAA AI Grader Pro** yang menghubungkan guru dan admin langsung ke server cloud sekolah maupun server LAN lokal dengan dukungan kamera resolusi penuh, pemindai QR, cetak A4, ekspor Excel/CSV, serta perlindungan anti-crash & cache offline.
+Aplikasi Android native berbasis Kotlin untuk **WMVAA AI Grader Pro** yang menghubungkan guru dan admin langsung ke server cloud sekolah maupun server LAN lokal dengan dukungan kamera resolusi penuh, pemindai QR berlampu senter (*flash*), cetak A4, ekspor & bagikan Excel/CSV/PDF, Deep Links, serta perlindungan anti-crash & cache offline.
 
 * 🌐 **Aplikasi Web Live:** [https://app.wmvaa.id/ai-grader](https://app.wmvaa.id/ai-grader)
 * 🏫 **Portal Resmi WMVAA:** [https://wmvaa.id](https://wmvaa.id) · [https://app.wmvaa.id](https://app.wmvaa.id)
@@ -8,31 +8,30 @@ Aplikasi Android native berbasis Kotlin untuk **WMVAA AI Grader Pro** yang mengh
 
 ---
 
-## Fitur Utama Mobile
+## Fitur Utama Mobile (`v2.0.9`)
 
-### 1. Koneksi Cloud & Server Lokal Fleksibel (`ServerSetupActivity.kt`, `LanServerDiscovery.kt`, `PrefsManager.kt`)
-* **Hosting Cloud Resmi 1-Klik:** Secara default langsung terhubung ke `https://app.wmvaa.id/ai-grader` (memaksa skema `HTTPS` aman untuk domain publik dan mempertahankan `HTTP` hanya untuk IP LAN privat).
-* **Scan QR Akses HP Guru:** Ketuk ikon QR pada Dashboard Web, lalu pindai menggunakan kamera aplikasi Android (`CaptureActivity` ZXing) untuk langsung mengonfigurasi alamat server.
-* **Auto-Discovery Wi-Fi (LAN):** Memindai subnet jaringan Wi-Fi sekolah pada port `3000` (mendukung endpoint `/ai-grader/api/system/network` maupun `/api/system/network`).
-* **Tes Koneksi & Riwayat Server:** Validasi koneksi real-time sebelum menyimpan, daftar hingga 5 server terakhir dengan penanda server aktif, tombol bersihkan riwayat, dan tombol *Kembali* sticky di header.
+### 1. Koneksi Cloud, Deep Link & Server Lokal Fleksibel (`ServerSetupActivity.kt`, `LanServerDiscovery.kt`, `PrefsManager.kt`, `QrCaptureActivity.kt`)
+* **Hosting Cloud Resmi 1-Klik:** Secara default langsung terhubung ke `https://app.wmvaa.id/ai-grader` (wajib skema `HTTPS` murni untuk domain resmi dan mendukung `HTTP`/sertifikat lokal untuk IP LAN privat RFC1918).
+* **Scan QR Akses HP Guru + Tombol Senter (Flash):** Ketuk ikon QR pada Dashboard Web, lalu pindai menggunakan kamera aplikasi Android (`QrCaptureActivity`) lengkap dengan tombol lampu senter (*torch*) untuk ruangan redup.
+* **Auto-Discovery Wi-Fi (LAN) & Fallback Subfolder:** Memindai subnet jaringan Wi-Fi sekolah pada port `3000` dengan fallback otomatis `/ai-grader/api/system/network` maupun `/api/system/network` serta dukungan sertifikat HTTPS LAN self-signed.
+* **Deep Link & App Links:** Mendukung pembukaan langsung dari tautan `https://app.wmvaa.id/ai-grader/...` maupun `wmvaa://grader/...`.
 
-### 2. Kamera LJK, Multi-Upload Galeri & Live Scanner (`MainActivity.kt`)
-* **Kamera HP Cepat (Resolusi Penuh):** Mendukung input kamera web via `MediaStore.ACTION_IMAGE_CAPTURE` + `FileProvider` (`${applicationId}.fileprovider`).
-* **Multi-Upload Galeri:** Mendukung pemilihan banyak foto LJK sekaligus (`MODE_OPEN_MULTIPLE`) untuk proses pemindaian batch.
-* **Live WebRTC Viewfinder:** Penanganan izin kamera runtime (`PERMISSION_GRANTED` / `PermissionRequest.RESOURCE_VIDEO_CAPTURE`) serta dialog konfirmasi sertifikat SSL khusus untuk IP jaringan lokal (RFC1918) pada mode HTTPS LAN.
+### 2. Kamera LJK, Multi-Upload Galeri/Dokumen & Live Scanner (`MainActivity.kt`)
+* **Kamera HP Cepat (Resolusi Penuh) & Auto-Cleanup:** Mendukung input kamera web via `MediaStore.ACTION_IMAGE_CAPTURE` + `FileProvider` (`${applicationId}.fileprovider`) dengan pembersihan otomatis file tangkapan sementara (>24 jam).
+* **Multi-Upload Galeri & Dokumen:** Mendukung pemilihan banyak foto LJK sekaligus (`MODE_OPEN_MULTIPLE`) maupun file dokumen (`.xlsx`, `.csv`, `.pdf`, `.docx`) sesuai `accept` pada input web.
+* **Live WebRTC Viewfinder & Pinning Sertifikat LAN:** Penanganan izin kamera runtime serta penyimpanan fingerprint SHA-256 sertifikat SSL untuk IP jaringan lokal (RFC1918).
 
 ### 3. Ergonomi Scroll & Smart Pull-to-Refresh (`MainActivity.kt`, `NativeWebBridge.kt`)
 * Sinkronisasi state scroll & modal melalui JavaScript Bridge (`WMVAANative.setSwipeRefreshEnabled`) yang bekerja sama dengan `PwaOfflineBridge.tsx`.
-* Ambang tarikan pull-to-refresh tinggi (`320px`) serta pengecekan `webView.scrollY > 0` dan `canScrollVertically(-1)` agar scroll naik-turun di HP terasa mulus dan tidak me-refresh halaman secara tidak sengaja.
+* Ambang tarikan pull-to-refresh tinggi (`320px`) serta pengecekan `webView.scrollY > 0` dan `canScrollVertically(-1)` agar scroll naik-turun di HP terasa mulus.
 
-### 4. Cetak LJK & Simpan Ekspor Dokumen (`NativeWebBridge.kt`)
+### 4. Cetak LJK, Simpan & Bagikan Ekspor Dokumen (`NativeWebBridge.kt`)
 * **Cetak / Simpan PDF:** Memetakan `window.print()` ke layanan `PrintManager` Android dengan format kertas standar **ISO A4**.
-* **Ekspor Excel / CSV / Kartu Login:** Menangkap URL `blob:` dari browser dan menyimpannya ke folder publik `Downloads/WMVAA-Grader/` menggunakan `MediaStore` (Android 10+) maupun `Environment.DIRECTORY_DOWNLOADS`.
+* **Ekspor Excel / CSV / Kartu Login + Dialog Buka & Bagikan:** Menangkap URL `blob:` dari browser, menyimpannya ke folder publik `Downloads/WMVAA-Grader/` (mendukung `MediaStore` Android 10+ maupun izin penyimpanan runtime Android 7–9), lalu menampilkan dialog cepat **Buka File** atau **Bagikan (WhatsApp/Lainnya)**.
 
-### 5. Stabilitas WebView, Pemulihan Koneksi & Kenyamanan Scan (`NetworkMonitor.kt`, `MainActivity.kt`)
-* **Layar Tetap Menyala (`FLAG_KEEP_SCREEN_ON`):** Toggle di Pengaturan Server agar layar HP tidak mati saat memindai puluhan lembar LJK.
-* **Pembersihan Cache & Service Worker Otomatis saat Upgrade:** Menghapus direktori usang `app_webview/Service Worker` dan `Cache` pada upgrade `versionCode` tanpa menghapus draft `Local Storage` maupun cookie sesi login.
-* **Pemantauan Jaringan & Pemulihan Error:** Banner status offline real-time, auto-reconnect saat koneksi kembali tersedia, layar pemulihan native (*Coba Sambungkan Lagi*, *Buka Cache Offline*, *Ganti Server / Scan QR*), serta proteksi anti-crash-loop pada `onRenderProcessGone`.
+### 5. Stabilitas WebView, Pemulihan Koneksi & In-App Update (`NetworkMonitor.kt`, `UpdateChecker.kt`, `MainActivity.kt`)
+* **In-App Update Checker:** Memeriksa rilis terbaru di GitHub Releases secara asinkron dan menawarkan unduhan langsung jika tersedia versi baru.
+* **Deteksi Wi-Fi LAN Offline & Pemulihan Error:** Mendukung jaringan Wi-Fi lokal sekolah tanpa internet publik, menyediakan layar pemulihan native (*Coba Sambungkan Lagi*, *Pengaturan Wi-Fi / Internet*, *Ganti Server / Scan QR*, *Buka Draft / Cache Offline*), serta proteksi anti-crash-loop lintas rekreasi Activity pada `onRenderProcessGone`.
 
 ---
 
@@ -40,23 +39,19 @@ Aplikasi Android native berbasis Kotlin untuk **WMVAA AI Grader Pro** yang mengh
 
 * **Package / Application ID:** `com.wmvaa.aigrader`
 * **Minimum SDK:** API 24 (Android 7.0) · **Target & Compile SDK:** API 34 (Android 14)
-* **Komponen Utama:**
-  * `MainActivity.kt` — Container `WebView` + `SwipeRefreshLayout`, kamera/galeri chooser, SSL LAN handler, pemulihan error & render process guard.
-  * `ServerSetupActivity.kt` — Pengaturan koneksi cloud/LAN, QR scanner, tes koneksi, dan opsi *Keep Screen On*.
-  * `NativeWebBridge.kt` — `@JavascriptInterface` (`WMVAANative`) untuk print A4, simpan file Base64/blob, buka pengaturan server, dan kontrol swipe-refresh.
-  * `LanServerDiscovery.kt` — Penemuan otomatis dan verifikasi HTTP endpoint server WMVAA.
-  * `PrefsManager.kt` — Normalisasi URL hosting subfolder (`/ai-grader`), riwayat server, dan pelacakan versi cache upgrade.
-  * `NetworkMonitor.kt` — Pemantau konektivitas jaringan berbasis `ConnectivityManager.NetworkCallback`.
+* **Optimasi Build Release:** APK Signature Scheme v1 + v2 + v3, R8 Minification & Resource Shrinking aktif, aset grafis terkompresi WebP.
 
 ---
 
-## Cara Membuka & Build APK
+## Cara Test & Build APK
 
-1. Buka folder `wmvaa-ai-grader-pro-mobile` menggunakan **Android Studio** (pastikan Android SDK API 34 & Java 17 terpasang).
-2. Tunggu Gradle Sync selesai.
-3. Build APK melalui menu **Build > Build Bundle(s) / APK(s) > Build APK(s)** atau jalankan lewat terminal:
+1. Jalankan unit test lokal:
    ```bash
-   ./gradlew assembleDebug
+   ./gradlew testDebugUnitTest
    ```
-   *(Di Windows PowerShell: `.\gradlew.bat assembleDebug`)*
-4. Output APK tersedia di `app/build/outputs/apk/debug/app-debug.apk`.
+2. Build Release APK (menggunakan `keystore.properties` lokal atau environment variable):
+   ```bash
+   ./gradlew assembleRelease
+   ```
+   *(Di Windows PowerShell: `.\gradlew.bat testDebugUnitTest assembleRelease`)*
+3. Output APK tersedia di `app/build/outputs/apk/release/app-release.apk`.
